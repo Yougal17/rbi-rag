@@ -1,0 +1,7 @@
+rbirag/
+.env
+__pycache__/
+*.pyc
+data/raw/
+*.pdf
+.DS_Store
