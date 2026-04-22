@@ -29,3 +29,31 @@ HEADERS = {
     )
 }
 
+# ─────────────────────────────────────────────
+# HELPER: polite sleep between requests
+# ─────────────────────────────────────────────
+
+def polite_sleep():
+    """Sleep a random amount between MIN_DELAY and MAX_DELAY seconds."""
+    delay = random.uniform(MIN_DELAY, MAX_DELAY)
+    print(f"  ⏳ Waiting {delay:.1f}s...")
+    time.sleep(delay)
+
+
+# ─────────────────────────────────────────────
+# HELPER: load existing metadata (avoid re-downloading)
+# ─────────────────────────────────────────────
+
+def load_existing_metadata():
+    """
+    Load metadata.json if it exists.
+    Returns a dict keyed by circular_number for fast lookup.
+    """
+    if os.path.exists(METADATA_FILE):
+        with open(METADATA_FILE, "r", encoding="utf-8") as f:
+            records = json.load(f)
+        # Key by circular_number for fast "already downloaded?" checks
+        return {r["circular_number"]: r for r in records}
+    return {}
+
+
