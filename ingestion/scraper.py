@@ -57,3 +57,9 @@ def load_existing_metadata():
     return {}
 
 
+def save_metadata(metadata_dict):
+    """Save the full metadata dict back to metadata.json."""
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+    records = list(metadata_dict.values())
+    with open(METADATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(records, f, indent=2, ensure_ascii=False)
