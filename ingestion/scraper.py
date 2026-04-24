@@ -63,3 +63,99 @@ def save_metadata(metadata_dict):
     records = list(metadata_dict.values())
     with open(METADATA_FILE, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────
+# STEP A: Get all circular links for a given year
+# ─────────────────────────────────────────────
+
+def get_circular_links_for_year(year):
+    """
+    Fetch the RBI circular index page for a given year.
+    Returns a list of dicts:
+      [{ title, date, circular_number, department, detail_url }, ...]
+    """
+    print(f"\n📅 Fetching circular index for year: {year}")
+
+    # RBI uses a query parameter to filter by year
+    params = {"Year": str(year)}
+
+    try:
+        response = requests.get(
+            INDEX_URL,
+            params=params,
+            headers=HEADERS,
+            timeout=30
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"  ❌ Failed to fetch index for {year}: {e}")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Find the main content table
+    # RBI's table has class 'tablebg' — inspect the page to confirm this
+    table = soup.find("table", {"class": "tablebg"})
+
+    if not table:
+        # Fallback: try finding any table with circular data
+        tables = soup.find_all("table")
+        print(f"  ⚠️  Could not find 'tablebg' table. Found {len(tables)} tables total.")
+        print("  ℹ️  You may need to inspect the page and update the table selector.")
+        return []
+
+    circulars = []
+    rows = table.find_all("tr")
+
+    for row in rows:
+        cols = row.find_all("td")
+
+        # Skip header rows or empty rows
+        if len(cols) < 3:
+            continue
+
+        try:
+            # Extract date (first column)
+            raw_date = cols[0].get_text(strip=True)
+
+            # Extract title and link (second column)
+            link_tag = cols[1].find("a")
+            if not link_tag:
+                continue
+
+            title = link_tag.get_text(strip=True)
+            relative_url = link_tag.get("href", "")
+
+            # Build full URL
+            if relative_url.startswith("http"):
+                detail_url = relative_url
+            else:
+                detail_url = BASE_URL + "/" + relative_url.lstrip("/")
+
+            # Extract circular number (third column)
+            circular_number = cols[2].get_text(strip=True)
+
+            # Extract department (fourth column, if exists)
+            department = cols[3].get_text(strip=True) if len(cols) > 3 else "Unknown"
+
+            # Clean up the date string
+            # RBI dates look like "Sep 15, 2024" or "15/09/2024"
+            date_cleaned = raw_date.strip()
+
+            circulars.append({
+                "title": title,
+                "date": date_cleaned,
+                "circular_number": circular_number if circular_number else f"UNKNOWN_{year}_{len(circulars)}",
+                "department": department,
+                "detail_url": detail_url,
+            })
+
+        except Exception as e:
+            print(f"  ⚠️  Error parsing row: {e}")
+            continue
+
+    print(f"  ✅ Found {len(circulars)} circulars for {year}")
+    return circulars
+
+
