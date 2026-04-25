@@ -159,3 +159,48 @@ def get_circular_links_for_year(year):
     return circulars
 
 
+# ─────────────────────────────────────────────
+# STEP B: Get the PDF download URL from the detail page
+# ─────────────────────────────────────────────
+
+def get_pdf_url_from_detail_page(detail_url):
+    """
+    Visit the intermediate circular detail page.
+    Find and return the direct PDF URL.
+    Returns None if no PDF found.
+    """
+    try:
+        response = requests.get(detail_url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"  ❌ Failed to fetch detail page: {e}")
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Strategy 1: Find direct .pdf links
+    for link in soup.find_all("a", href=True):
+        href = link["href"]
+        if href.lower().endswith(".pdf"):
+            if href.startswith("http"):
+                return href
+            else:
+                return BASE_URL + "/" + href.lstrip("/")
+
+    # Strategy 2: Find links with "PDF" in the text
+    for link in soup.find_all("a", href=True):
+        link_text = link.get_text(strip=True).upper()
+        if "PDF" in link_text:
+            href = link["href"]
+            if href.startswith("http"):
+                return href
+            else:
+                return BASE_URL + "/" + href.lstrip("/")
+
+    # Strategy 3: Check if the detail_url itself is a PDF
+    if detail_url.lower().endswith(".pdf"):
+        return detail_url
+
+    return None
+
+
