@@ -204,3 +204,43 @@ def get_pdf_url_from_detail_page(detail_url):
     return None
 
 
+# ─────────────────────────────────────────────
+# STEP C: Download a single PDF
+# ─────────────────────────────────────────────
+
+def download_pdf(pdf_url, filename):
+    """
+    Download a PDF from pdf_url and save it to data/raw/filename.
+    Returns True on success, False on failure.
+    """
+    filepath = os.path.join(RAW_DIR, filename)
+
+    # Skip if already downloaded — never re-download
+    if os.path.exists(filepath):
+        print(f"  ⏭️  Already exists, skipping: {filename}")
+        return True
+
+    try:
+        response = requests.get(pdf_url, headers=HEADERS, timeout=60, stream=True)
+        response.raise_for_status()
+
+        # Verify it's actually a PDF
+        content_type = response.headers.get("Content-Type", "")
+        if "pdf" not in content_type.lower() and not pdf_url.lower().endswith(".pdf"):
+            print(f"  ⚠️  Unexpected content type: {content_type}")
+
+        os.makedirs(RAW_DIR, exist_ok=True)
+
+        with open(filepath, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        size_kb = os.path.getsize(filepath) / 1024
+        print(f"  ✅ Downloaded: {filename} ({size_kb:.1f} KB)")
+        return True
+
+    except requests.RequestException as e:
+        print(f"  ❌ Failed to download {filename}: {e}")
+        return False
+
+
