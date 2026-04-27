@@ -244,3 +244,17 @@ def download_pdf(pdf_url, filename):
         return False
 
 
+# ─────────────────────────────────────────────
+# HELPER: Create a clean filename from circular number
+# ─────────────────────────────────────────────
+
+def make_filename(circular_number):
+    """
+    Convert 'RBI/2024-25/73' → 'RBI_2024-25_73.pdf'
+    Removes characters that are invalid in filenames.
+    """
+    clean = re.sub(r"[^\w\-]", "_", circular_number)
+    clean = re.sub(r"_+", "_", clean)  # collapse multiple underscores
+    return f"{clean}.pdf"
+
+
