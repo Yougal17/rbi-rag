@@ -258,3 +258,95 @@ def make_filename(circular_number):
     return f"{clean}.pdf"
 
 
+# ─────────────────────────────────────────────
+# MAIN SCRAPER FUNCTION
+# ─────────────────────────────────────────────
+
+def run_scraper():
+    """
+    Main function — orchestrates the full scraping pipeline.
+    """
+    print("=" * 60)
+    print("RBI Circular Scraper")
+    print(f"Years: {YEARS_TO_SCRAPE}")
+    print(f"Saving PDFs to: {RAW_DIR}")
+    print(f"Saving metadata to: {METADATA_FILE}")
+    print("=" * 60)
+
+    # Load existing metadata so we don't re-download
+    metadata = load_existing_metadata()
+    print(f"\n📂 Already have {len(metadata)} circulars in metadata.")
+
+    total_downloaded = 0
+    total_skipped = 0
+    total_failed = 0
+
+    for year in YEARS_TO_SCRAPE:
+
+        # Get all circular listings for this year
+        circulars = get_circular_links_for_year(year)
+        polite_sleep()
+
+        for i, circular in enumerate(circulars):
+            circ_num = circular["circular_number"]
+            print(f"\n[{i+1}/{len(circulars)}] {circ_num}")
+            print(f"  📄 {circular['title'][:70]}...")
+
+            # Skip if already in metadata (already downloaded before)
+            if circ_num in metadata:
+                print(f"  ⏭️  Already in metadata, skipping.")
+                total_skipped += 1
+                continue
+
+            # Visit detail page to get PDF URL
+            pdf_url = get_pdf_url_from_detail_page(circular["detail_url"])
+            polite_sleep()
+
+            if not pdf_url:
+                print(f"  ❌ No PDF found for {circ_num}")
+                total_failed += 1
+                continue
+
+            # Create a clean filename
+            filename = make_filename(circ_num)
+
+            # Download the PDF
+            success = download_pdf(pdf_url, filename)
+            polite_sleep()
+
+            if success:
+                # Save metadata for this circular
+                metadata[circ_num] = {
+                    "circular_number": circ_num,
+                    "title": circular["title"],
+                    "date": circular["date"],
+                    "department": circular["department"],
+                    "detail_url": circular["detail_url"],
+                    "pdf_url": pdf_url,
+                    "pdf_filename": filename,
+                    "scraped_at": datetime.now().isoformat(),
+                }
+
+                # Save metadata after every download
+                # (so progress isn't lost if scraper crashes)
+                save_metadata(metadata)
+                total_downloaded += 1
+            else:
+                total_failed += 1
+
+    # Final summary
+    print("\n" + "=" * 60)
+    print("SCRAPING COMPLETE")
+    print(f"  ✅ Downloaded: {total_downloaded}")
+    print(f"  ⏭️  Skipped (already had): {total_skipped}")
+    print(f"  ❌ Failed: {total_failed}")
+    print(f"  📂 Total in metadata: {len(metadata)}")
+    print("=" * 60)
+
+
+# ─────────────────────────────────────────────
+# RUN
+# ─────────────────────────────────────────────
+
+if __name__ == "__main__":
+    run_scraper()
