@@ -25,7 +25,7 @@ MAX_DELAY = 4.0
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (compatible; RBI-RAG-Research-Bot/1.0; "
-        "Educational project — contact yougalattri17@gmail.com)"
+        "Educational project - contact yougalattri17@gmail.com)"
     )
 }
 
@@ -70,6 +70,88 @@ def save_metadata(metadata_dict):
 # ─────────────────────────────────────────────
 
 def get_circular_links_for_year(year):
+    """
+    Fetch the RBI circular index page for a given year.
+    Returns a list of dicts:
+      [{ title, date, circular_number, department, detail_url }, ...]
+    """
+    print(f"\n📅 Fetching circular index for year: {year}")
+
+    params = {"Year": str(year)}
+
+    try:
+        response = requests.get(
+            INDEX_URL,
+            params=params,
+            headers=HEADERS,
+            timeout=30
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"  ❌ Failed to fetch index for {year}: {e}")
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = soup.find("table", {"class": "tablebg"})
+
+    if not table:
+        print(f"  ❌ Could not find tablebg table for {year}")
+        return []
+
+    circulars = []
+    rows = table.find_all("tr")
+
+    for row in rows:
+        cols = row.find_all("td")
+
+        # Need at least 4 columns
+        if len(cols) < 4:
+            continue
+
+        try:
+            # col[0]: anchor tag — circular number + detail page link
+            link_tag = cols[0].find("a")
+            if not link_tag:
+                continue
+
+            # The <br/> inside the link splits circular number from sub-number
+            # get_text() merges them — we want the full text
+            circular_number = link_tag.get_text(separator=" ", strip=True)
+
+            # Build full detail URL
+            relative_href = link_tag.get("href", "")
+            detail_url = BASE_URL + "/Scripts/" + relative_href.lstrip("/")
+
+            # col[1]: date
+            date = cols[1].get_text(strip=True)
+
+            # col[2]: department
+            department = cols[2].get_text(strip=True)
+
+            # col[3]: title
+            title = cols[3].get_text(strip=True)
+
+            # col[4]: addressee (bonus metadata — useful for filtering later)
+            addressee = cols[4].get_text(strip=True) if len(cols) > 4 else ""
+
+            if not circular_number or not detail_url:
+                continue
+
+            circulars.append({
+                "circular_number": circular_number,
+                "date": date,
+                "department": department,
+                "title": title,
+                "addressee": addressee,
+                "detail_url": detail_url,
+            })
+
+        except Exception as e:
+            print(f"  ⚠️  Error parsing row: {e}")
+            continue
+
+    print(f"  ✅ Found {len(circulars)} circulars for {year}")
+    return circulars
     """
     Fetch the RBI circular index page for a given year.
     Returns a list of dicts:
@@ -317,15 +399,16 @@ def run_scraper():
             if success:
                 # Save metadata for this circular
                 metadata[circ_num] = {
-                    "circular_number": circ_num,
-                    "title": circular["title"],
-                    "date": circular["date"],
-                    "department": circular["department"],
-                    "detail_url": circular["detail_url"],
-                    "pdf_url": pdf_url,
-                    "pdf_filename": filename,
-                    "scraped_at": datetime.now().isoformat(),
-                }
+                "circular_number": circ_num,
+                "title": circular["title"],
+                "date": circular["date"],
+                "department": circular["department"],
+                "addressee": circular["addressee"],   # ← add this line
+                "detail_url": circular["detail_url"],
+                "pdf_url": pdf_url,
+                "pdf_filename": filename,
+                "scraped_at": datetime.now().isoformat(),
+            }
 
                 # Save metadata after every download
                 # (so progress isn't lost if scraper crashes)
