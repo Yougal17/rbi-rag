@@ -1,3 +1,5 @@
+# ingestion/scraper.py
+
 import os
 import re
 import json
@@ -7,21 +9,28 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
+# ─────────────────────────────────────────────
+# CONFIGURATION
+# ─────────────────────────────────────────────
+
 BASE_URL = "https://www.rbi.org.in"
-INDEX_URL = "https://www.rbi.org.in/Scripts/BS_CircularIndexDisplay.aspx"
+DETAIL_URL = "https://www.rbi.org.in/Scripts/BS_CircularIndexDisplay.aspx?Id={}"
 
 RAW_DIR = "data/raw"
 PROCESSED_DIR = "data/processed"
 METADATA_FILE = os.path.join(PROCESSED_DIR, "metadata.json")
 
-# Years to scrape — we decided on last 3 years in Step 2
-YEARS_TO_SCRAPE = [2022, 2023, 2024, 2025, 2026]
+# ID range covering 2022–2026
+# From our probe: ID ~12300 = start of 2022, ID ~13450 = latest 2026
+ID_START = 12300
+ID_END   = 13450
 
-# Random range so we don't look like a bot with perfectly timed requests
+# Years we want — circulars outside this range get skipped
+TARGET_YEARS = {"2022", "2023", "2024", "2025", "2026"}
+
 MIN_DELAY = 2.0
-MAX_DELAY = 4.0
+MAX_DELAY = 3.5
 
-# Headers — we identify ourselves honestly
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (compatible; RBI-RAG-Research-Bot/1.0; "
@@ -30,289 +39,170 @@ HEADERS = {
 }
 
 # ─────────────────────────────────────────────
-# HELPER: polite sleep between requests
+# HELPERS
 # ─────────────────────────────────────────────
 
 def polite_sleep():
-    """Sleep a random amount between MIN_DELAY and MAX_DELAY seconds."""
     delay = random.uniform(MIN_DELAY, MAX_DELAY)
     print(f"  ⏳ Waiting {delay:.1f}s...")
     time.sleep(delay)
 
 
-# ─────────────────────────────────────────────
-# HELPER: load existing metadata (avoid re-downloading)
-# ─────────────────────────────────────────────
-
 def load_existing_metadata():
-    """
-    Load metadata.json if it exists.
-    Returns a dict keyed by circular_number for fast lookup.
-    """
+    """Load metadata.json — keyed by circular_id for fast lookup."""
     if os.path.exists(METADATA_FILE):
         with open(METADATA_FILE, "r", encoding="utf-8") as f:
             records = json.load(f)
-        # Key by circular_number for fast "already downloaded?" checks
-        return {r["circular_number"]: r for r in records}
+        return {str(r["circular_id"]): r for r in records}
     return {}
 
 
 def save_metadata(metadata_dict):
-    """Save the full metadata dict back to metadata.json."""
     os.makedirs(PROCESSED_DIR, exist_ok=True)
     records = list(metadata_dict.values())
     with open(METADATA_FILE, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2, ensure_ascii=False)
 
 
+def make_filename(circular_id, circular_number):
+    """Create a clean filename from the circular ID and number."""
+    clean = re.sub(r"[^\w\-]", "_", circular_number)
+    clean = re.sub(r"_+", "_", clean).strip("_")
+    return f"{circular_id}_{clean}.pdf"
+
+
+def extract_year(date_str):
+    """
+    Extract 4-digit year from date strings like:
+    '27.4.2026', '02/05/2024', 'April 27, 2026'
+    Returns year as string or None.
+    """
+    match = re.search(r'(20\d{2})', date_str)
+    return match.group(1) if match else None
+
+
 # ─────────────────────────────────────────────
-# STEP A: Get all circular links for a given year
+# CORE: Parse a single circular detail page
 # ─────────────────────────────────────────────
 
-def get_circular_links_for_year(year):
+def parse_detail_page(circular_id):
     """
-    Fetch the RBI circular index page for a given year.
-    Returns a list of dicts:
-      [{ title, date, circular_number, department, detail_url }, ...]
-    """
-    print(f"\n📅 Fetching circular index for year: {year}")
+    Fetch and parse a single circular detail page by ID.
 
-    params = {"Year": str(year)}
+    Returns a dict with all metadata + pdf_url, or None if:
+    - Page doesn't exist
+    - No circular number found (invalid/empty page)
+    - Year is outside TARGET_YEARS
+    """
+    url = DETAIL_URL.format(circular_id)
 
     try:
-        response = requests.get(
-            INDEX_URL,
-            params=params,
-            headers=HEADERS,
-            timeout=30
-        )
+        response = requests.get(url, headers=HEADERS, timeout=20)
         response.raise_for_status()
     except requests.RequestException as e:
-        print(f"  ❌ Failed to fetch index for {year}: {e}")
-        return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    table = soup.find("table", {"class": "tablebg"})
-
-    if not table:
-        print(f"  ❌ Could not find tablebg table for {year}")
-        return []
-
-    circulars = []
-    rows = table.find_all("tr")
-
-    for row in rows:
-        cols = row.find_all("td")
-
-        # Need at least 4 columns
-        if len(cols) < 4:
-            continue
-
-        try:
-            # col[0]: anchor tag — circular number + detail page link
-            link_tag = cols[0].find("a")
-            if not link_tag:
-                continue
-
-            # The <br/> inside the link splits circular number from sub-number
-            # get_text() merges them — we want the full text
-            circular_number = link_tag.get_text(separator=" ", strip=True)
-
-            # Build full detail URL
-            relative_href = link_tag.get("href", "")
-            detail_url = BASE_URL + "/Scripts/" + relative_href.lstrip("/")
-
-            # col[1]: date
-            date = cols[1].get_text(strip=True)
-
-            # col[2]: department
-            department = cols[2].get_text(strip=True)
-
-            # col[3]: title
-            title = cols[3].get_text(strip=True)
-
-            # col[4]: addressee (bonus metadata — useful for filtering later)
-            addressee = cols[4].get_text(strip=True) if len(cols) > 4 else ""
-
-            if not circular_number or not detail_url:
-                continue
-
-            circulars.append({
-                "circular_number": circular_number,
-                "date": date,
-                "department": department,
-                "title": title,
-                "addressee": addressee,
-                "detail_url": detail_url,
-            })
-
-        except Exception as e:
-            print(f"  ⚠️  Error parsing row: {e}")
-            continue
-
-    print(f"  ✅ Found {len(circulars)} circulars for {year}")
-    return circulars
-    """
-    Fetch the RBI circular index page for a given year.
-    Returns a list of dicts:
-      [{ title, date, circular_number, department, detail_url }, ...]
-    """
-    print(f"\n📅 Fetching circular index for year: {year}")
-
-    # RBI uses a query parameter to filter by year
-    params = {"Year": str(year)}
-
-    try:
-        response = requests.get(
-            INDEX_URL,
-            params=params,
-            headers=HEADERS,
-            timeout=30
-        )
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"  ❌ Failed to fetch index for {year}: {e}")
-        return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Find the main content table
-    # RBI's table has class 'tablebg' — inspect the page to confirm this
-    table = soup.find("table", {"class": "tablebg"})
-
-    if not table:
-        # Fallback: try finding any table with circular data
-        tables = soup.find_all("table")
-        print(f"  ⚠️  Could not find 'tablebg' table. Found {len(tables)} tables total.")
-        print("  ℹ️  You may need to inspect the page and update the table selector.")
-        return []
-
-    circulars = []
-    rows = table.find_all("tr")
-
-    for row in rows:
-        cols = row.find_all("td")
-
-        # Skip header rows or empty rows
-        if len(cols) < 3:
-            continue
-
-        try:
-            # Extract date (first column)
-            raw_date = cols[0].get_text(strip=True)
-
-            # Extract title and link (second column)
-            link_tag = cols[1].find("a")
-            if not link_tag:
-                continue
-
-            title = link_tag.get_text(strip=True)
-            relative_url = link_tag.get("href", "")
-
-            # Build full URL
-            if relative_url.startswith("http"):
-                detail_url = relative_url
-            else:
-                detail_url = BASE_URL + "/" + relative_url.lstrip("/")
-
-            # Extract circular number (third column)
-            circular_number = cols[2].get_text(strip=True)
-
-            # Extract department (fourth column, if exists)
-            department = cols[3].get_text(strip=True) if len(cols) > 3 else "Unknown"
-
-            # Clean up the date string
-            # RBI dates look like "Sep 15, 2024" or "15/09/2024"
-            date_cleaned = raw_date.strip()
-
-            circulars.append({
-                "title": title,
-                "date": date_cleaned,
-                "circular_number": circular_number if circular_number else f"UNKNOWN_{year}_{len(circulars)}",
-                "department": department,
-                "detail_url": detail_url,
-            })
-
-        except Exception as e:
-            print(f"  ⚠️  Error parsing row: {e}")
-            continue
-
-    print(f"  ✅ Found {len(circulars)} circulars for {year}")
-    return circulars
-
-
-# ─────────────────────────────────────────────
-# STEP B: Get the PDF download URL from the detail page
-# ─────────────────────────────────────────────
-
-def get_pdf_url_from_detail_page(detail_url):
-    """
-    Visit the intermediate circular detail page.
-    Find and return the direct PDF URL.
-    Returns None if no PDF found.
-    """
-    try:
-        response = requests.get(detail_url, headers=HEADERS, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"  ❌ Failed to fetch detail page: {e}")
+        print(f"  ❌ Request failed: {e}")
         return None
 
     soup = BeautifulSoup(response.text, "html.parser")
+    full_text = soup.get_text(separator=" ", strip=True)
 
-    # Strategy 1: Find direct .pdf links
+    # ── Extract circular number ──────────────────
+    # Pattern: RBI/2024-25/73 or RBI/DOR/2024-25/36
+    circ_match = re.search(
+        r'(RBI/[A-Z]{0,6}/?20\d{2}-\d{2,4}/\d+\S*)',
+        full_text
+    )
+    if not circ_match:
+        # Page exists but has no circular — likely a deleted/invalid ID
+        return None
+
+    circular_number = circ_match.group(1).strip()
+
+    # ── Extract date ─────────────────────────────
+    date_match = re.search(r'(\d{1,2}[./]\d{1,2}[./]20\d{2})', full_text)
+    date = date_match.group(1) if date_match else "unknown"
+
+    # ── Year gate — skip if outside target range ─
+    year = extract_year(date)
+    if year and year not in TARGET_YEARS:
+        print(f"  ⏭️  Year {year} outside target range — skipping.")
+        return None
+
+    # ── Extract department ───────────────────────
+    # RBI pages have department in a consistent location
+    dept_match = re.search(
+        r'(Department of [A-Za-z\s&,]+|[A-Z][a-z]+ Markets [A-Za-z\s]+Department)',
+        full_text
+    )
+    department = dept_match.group(1).strip() if dept_match else "Unknown"
+
+    # ── Extract title ────────────────────────────
+    # Title is usually in <title> tag or first <h2>/<h3>
+    title = ""
+    title_tag = soup.find("title")
+    if title_tag:
+        title = title_tag.get_text(strip=True)
+        # RBI title tags look like "RBI | Master Direction on KYC"
+        if "|" in title:
+            title = title.split("|")[-1].strip()
+
+    if not title:
+        for tag in ["h2", "h3", "h4"]:
+            found = soup.find(tag)
+            if found:
+                title = found.get_text(strip=True)
+                break
+
+    # ── Find PDF URL ─────────────────────────────
+    pdf_url = None
+
+    # Strategy 1: direct .pdf link
     for link in soup.find_all("a", href=True):
         href = link["href"]
         if href.lower().endswith(".pdf"):
-            if href.startswith("http"):
-                return href
-            else:
-                return BASE_URL + "/" + href.lstrip("/")
+            pdf_url = href if href.startswith("http") else BASE_URL + "/" + href.lstrip("/")
+            break
 
-    # Strategy 2: Find links with "PDF" in the text
-    for link in soup.find_all("a", href=True):
-        link_text = link.get_text(strip=True).upper()
-        if "PDF" in link_text:
-            href = link["href"]
-            if href.startswith("http"):
-                return href
-            else:
-                return BASE_URL + "/" + href.lstrip("/")
+    # Strategy 2: link with "PDF" in text
+    if not pdf_url:
+        for link in soup.find_all("a", href=True):
+            if "pdf" in link.get_text(strip=True).lower():
+                href = link["href"]
+                pdf_url = href if href.startswith("http") else BASE_URL + "/" + href.lstrip("/")
+                break
 
-    # Strategy 3: Check if the detail_url itself is a PDF
-    if detail_url.lower().endswith(".pdf"):
-        return detail_url
-
-    return None
+    return {
+        "circular_id": circular_id,
+        "circular_number": circular_number,
+        "title": title,
+        "date": date,
+        "year": year or "unknown",
+        "department": department,
+        "detail_url": url,
+        "pdf_url": pdf_url,
+        "pdf_filename": None,  # filled after download
+    }
 
 
 # ─────────────────────────────────────────────
-# STEP C: Download a single PDF
+# DOWNLOAD PDF
 # ─────────────────────────────────────────────
 
 def download_pdf(pdf_url, filename):
-    """
-    Download a PDF from pdf_url and save it to data/raw/filename.
-    Returns True on success, False on failure.
-    """
+    """Download PDF to data/raw/. Returns True on success."""
     filepath = os.path.join(RAW_DIR, filename)
 
-    # Skip if already downloaded — never re-download
     if os.path.exists(filepath):
-        print(f"  ⏭️  Already exists, skipping: {filename}")
+        print(f"  ⏭️  Already exists: {filename}")
         return True
 
     try:
-        response = requests.get(pdf_url, headers=HEADERS, timeout=60, stream=True)
+        response = requests.get(
+            pdf_url, headers=HEADERS, timeout=60, stream=True
+        )
         response.raise_for_status()
 
-        # Verify it's actually a PDF
-        content_type = response.headers.get("Content-Type", "")
-        if "pdf" not in content_type.lower() and not pdf_url.lower().endswith(".pdf"):
-            print(f"  ⚠️  Unexpected content type: {content_type}")
-
         os.makedirs(RAW_DIR, exist_ok=True)
-
         with open(filepath, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
@@ -322,114 +212,84 @@ def download_pdf(pdf_url, filename):
         return True
 
     except requests.RequestException as e:
-        print(f"  ❌ Failed to download {filename}: {e}")
+        print(f"  ❌ Download failed: {e}")
+        # Remove partial file if it exists
+        if os.path.exists(filepath):
+            os.remove(filepath)
         return False
 
 
 # ─────────────────────────────────────────────
-# HELPER: Create a clean filename from circular number
-# ─────────────────────────────────────────────
-
-def make_filename(circular_number):
-    """
-    Convert 'RBI/2024-25/73' → 'RBI_2024-25_73.pdf'
-    Removes characters that are invalid in filenames.
-    """
-    clean = re.sub(r"[^\w\-]", "_", circular_number)
-    clean = re.sub(r"_+", "_", clean)  # collapse multiple underscores
-    return f"{clean}.pdf"
-
-
-# ─────────────────────────────────────────────
-# MAIN SCRAPER FUNCTION
+# MAIN
 # ─────────────────────────────────────────────
 
 def run_scraper():
-    """
-    Main function — orchestrates the full scraping pipeline.
-    """
     print("=" * 60)
-    print("RBI Circular Scraper")
-    print(f"Years: {YEARS_TO_SCRAPE}")
-    print(f"Saving PDFs to: {RAW_DIR}")
-    print(f"Saving metadata to: {METADATA_FILE}")
+    print("RBI Circular Scraper — ID Range Mode")
+    print(f"ID range: {ID_START} → {ID_END}")
+    print(f"Target years: {TARGET_YEARS}")
     print("=" * 60)
 
-    # Load existing metadata so we don't re-download
     metadata = load_existing_metadata()
-    print(f"\n📂 Already have {len(metadata)} circulars in metadata.")
+    print(f"\n📂 Already have {len(metadata)} circulars in metadata.\n")
 
     total_downloaded = 0
-    total_skipped = 0
-    total_failed = 0
+    total_skipped    = 0
+    total_failed     = 0
+    total_invalid    = 0
+    total_ids        = ID_END - ID_START + 1
 
-    for year in YEARS_TO_SCRAPE:
+    for circular_id in range(ID_START, ID_END + 1):
+        progress = circular_id - ID_START + 1
+        print(f"\n[{progress}/{total_ids}] Checking ID {circular_id}...")
 
-        # Get all circular listings for this year
-        circulars = get_circular_links_for_year(year)
+        # Skip if already processed
+        if str(circular_id) in metadata:
+            print(f"  ⏭️  Already in metadata.")
+            total_skipped += 1
+            continue
+
+        # Parse the detail page
+        info = parse_detail_page(circular_id)
         polite_sleep()
 
-        for i, circular in enumerate(circulars):
-            circ_num = circular["circular_number"]
-            print(f"\n[{i+1}/{len(circulars)}] {circ_num}")
-            print(f"  📄 {circular['title'][:70]}...")
+        if not info:
+            print(f"  ⚪ Invalid or out-of-range page.")
+            total_invalid += 1
+            continue
 
-            # Skip if already in metadata (already downloaded before)
-            if circ_num in metadata:
-                print(f"  ⏭️  Already in metadata, skipping.")
-                total_skipped += 1
-                continue
+        print(f"  📄 {info['circular_number']} | {info['date']}")
+        print(f"  📝 {info['title'][:70]}...")
 
-            # Visit detail page to get PDF URL
-            pdf_url = get_pdf_url_from_detail_page(circular["detail_url"])
-            polite_sleep()
-
-            if not pdf_url:
-                print(f"  ❌ No PDF found for {circ_num}")
-                total_failed += 1
-                continue
-
-            # Create a clean filename
-            filename = make_filename(circ_num)
-
-            # Download the PDF
-            success = download_pdf(pdf_url, filename)
+        # Download PDF if URL found
+        if info["pdf_url"]:
+            filename = make_filename(circular_id, info["circular_number"])
+            success = download_pdf(info["pdf_url"], filename)
             polite_sleep()
 
             if success:
-                # Save metadata for this circular
-                metadata[circ_num] = {
-                "circular_number": circ_num,
-                "title": circular["title"],
-                "date": circular["date"],
-                "department": circular["department"],
-                "addressee": circular["addressee"],   # ← add this line
-                "detail_url": circular["detail_url"],
-                "pdf_url": pdf_url,
-                "pdf_filename": filename,
-                "scraped_at": datetime.now().isoformat(),
-            }
-
-                # Save metadata after every download
-                # (so progress isn't lost if scraper crashes)
+                info["pdf_filename"] = filename
+                metadata[str(circular_id)] = info
                 save_metadata(metadata)
                 total_downloaded += 1
             else:
                 total_failed += 1
+        else:
+            # Save metadata even without PDF — still useful
+            print(f"  ⚠️  No PDF found — saving metadata only.")
+            metadata[str(circular_id)] = info
+            save_metadata(metadata)
 
-    # Final summary
+    # Summary
     print("\n" + "=" * 60)
     print("SCRAPING COMPLETE")
-    print(f"  ✅ Downloaded: {total_downloaded}")
-    print(f"  ⏭️  Skipped (already had): {total_skipped}")
-    print(f"  ❌ Failed: {total_failed}")
-    print(f"  📂 Total in metadata: {len(metadata)}")
+    print(f"  ✅ Downloaded:      {total_downloaded}")
+    print(f"  ⏭️  Skipped:         {total_skipped}")
+    print(f"  ⚪ Invalid/empty:   {total_invalid}")
+    print(f"  ❌ Failed:          {total_failed}")
+    print(f"  📂 Total metadata:  {len(metadata)}")
     print("=" * 60)
 
-
-# ─────────────────────────────────────────────
-# RUN
-# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     run_scraper()
