@@ -13,41 +13,72 @@ from datetime import datetime
 # CONFIGURATION
 # ─────────────────────────────────────────────
 
-BASE_URL = "https://www.rbi.org.in"
+BASE_URL   = "https://www.rbi.org.in"
 DETAIL_URL = "https://www.rbi.org.in/Scripts/BS_CircularIndexDisplay.aspx?Id={}"
 
-RAW_DIR = "data/raw"
+RAW_DIR       = "data/raw"
 PROCESSED_DIR = "data/processed"
 METADATA_FILE = os.path.join(PROCESSED_DIR, "metadata.json")
 
-# ID range covering 2022–2026
-# From our probe: ID ~12300 = start of 2022, ID ~13450 = latest 2026
 ID_START = 12300
 ID_END   = 13450
 
-# Years we want — circulars outside this range get skipped
 TARGET_YEARS = {"2022", "2023", "2024", "2025", "2026"}
 
-MIN_DELAY = 2.0
-MAX_DELAY = 3.5
+# Increased delays — more human-like
+MIN_DELAY     = 4.0
+MAX_DELAY     = 8.0
 
+# Extra long pause every N requests — mimics human taking a break
+LONG_PAUSE_EVERY = 20
+LONG_PAUSE_MIN   = 30.0
+LONG_PAUSE_MAX   = 60.0
+
+MAX_RETRIES  = 3
+RETRY_BACKOFF = 10  # seconds to wait between retries
+
+# Realistic browser headers
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; RBI-RAG-Research-Bot/1.0; "
-        "Educational project - contact yougalattri17@gmail.com)"
-    )
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;"
+        "q=0.9,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
 }
+
+# ─────────────────────────────────────────────
+# SESSION — reuse TCP connection like a browser
+# ─────────────────────────────────────────────
+
+def make_session():
+    """Create a fresh requests Session with our headers."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    return session
+
+# Global session — recreated periodically
+SESSION = make_session()
 
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 
-def polite_sleep():
-    delay = random.uniform(MIN_DELAY, MAX_DELAY)
-    print(f"  ⏳ Waiting {delay:.1f}s...")
+def polite_sleep(long=False):
+    if long:
+        delay = random.uniform(LONG_PAUSE_MIN, LONG_PAUSE_MAX)
+        print(f"  😴 Long pause: {delay:.0f}s (mimicking human break)...")
+    else:
+        delay = random.uniform(MIN_DELAY, MAX_DELAY)
+        print(f"  ⏳ Waiting {delay:.1f}s...")
     time.sleep(delay)
-
-
 def load_existing_metadata():
     """Load metadata.json — keyed by circular_id for fast lookup."""
     if os.path.exists(METADATA_FILE):
@@ -289,7 +320,6 @@ def run_scraper():
     print(f"  ❌ Failed:          {total_failed}")
     print(f"  📂 Total metadata:  {len(metadata)}")
     print("=" * 60)
-
 
 if __name__ == "__main__":
     run_scraper()
