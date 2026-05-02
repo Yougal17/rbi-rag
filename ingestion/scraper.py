@@ -127,11 +127,27 @@ def parse_detail_page(circular_id):
     """
     url = DETAIL_URL.format(circular_id)
 
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=20)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"  ❌ Request failed: {e}")
+    global SESSION
+
+    response = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = SESSION.get(url, timeout=25)
+            response.raise_for_status()
+            break  # success — exit retry loop
+
+        except requests.RequestException as e:
+            print(f"  ⚠️  Attempt {attempt}/{MAX_RETRIES} failed: {type(e).__name__}")
+            if attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF * attempt  # 10s, 20s, 30s
+                print(f"  🔄 Retrying in {wait}s...")
+                time.sleep(wait)
+                SESSION = make_session()  # fresh session on retry
+            else:
+                print(f"  ❌ All retries exhausted for ID {circular_id}")
+                return None
+
+    if not response:
         return None
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -228,8 +244,8 @@ def download_pdf(pdf_url, filename):
         return True
 
     try:
-        response = requests.get(
-            pdf_url, headers=HEADERS, timeout=60, stream=True
+        response = SESSION.get(
+            pdf_url, timeout=60, stream=True
         )
         response.raise_for_status()
 
@@ -273,6 +289,11 @@ def run_scraper():
     for circular_id in range(ID_START, ID_END + 1):
         progress = circular_id - ID_START + 1
         print(f"\n[{progress}/{total_ids}] Checking ID {circular_id}...")
+
+        # Periodic long pause every N requests
+        processed_count = progress - total_skipped
+        if processed_count > 0 and processed_count % LONG_PAUSE_EVERY == 0:
+            polite_sleep(long=True)
 
         # Skip if already processed
         if str(circular_id) in metadata:
