@@ -105,7 +105,7 @@ def make_filename(circular_id, circular_number):
 def extract_year(date_str):
     """
     Extract 4-digit year from date strings like:
-    '27.4.2026', '02/05/2024', 'April 27, 2026'
+    '27.4.2026', '02/05/2024', 'May 09, 2023'
     Returns year as string or None.
     """
     match = re.search(r'(20\d{2})', date_str)
@@ -173,8 +173,31 @@ def parse_detail_page(circular_id):
     circular_number = circ_match.group(1).strip()
 
     # ── Extract date ─────────────────────────────
-    date_match = re.search(r'(\d{1,2}[./]\d{1,2}[./]20\d{2})', full_text)
-    date = date_match.group(1) if date_match else "unknown"
+    # RBI detail pages put date in <p align="right">May 09, 2023</p>
+    date = "unknown"
+
+    # Strategy 1: <p align="right"> tag
+    for p in soup.find_all("p", align="right"):
+        p_text = p.get_text(strip=True)
+        if re.search(r'20\d{2}', p_text):
+            date = p_text
+            break
+
+    # Strategy 2: fallback to DD.MM.YYYY pattern in full text
+    if date == "unknown":
+        date_match = re.search(r'(\d{1,2}[./]\d{1,2}[./]20\d{2})', full_text)
+        if date_match:
+            date = date_match.group(1)
+
+    # Strategy 3: Month DD, YYYY pattern in full text
+    if date == "unknown":
+        date_match = re.search(
+            r'(January|February|March|April|May|June|July|August|'
+            r'September|October|November|December)\s+\d{1,2},\s+20\d{2}',
+            full_text
+        )
+        if date_match:
+            date = date_match.group(0)
 
     # ── Year gate — skip if outside target range ─
     year = extract_year(date)
