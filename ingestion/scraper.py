@@ -125,9 +125,10 @@ def parse_detail_page(circular_id):
     - No circular number found (invalid/empty page)
     - Year is outside TARGET_YEARS
     """
-    url = DETAIL_URL.format(circular_id)
-
+    
     global SESSION
+    
+    url = DETAIL_URL.format(circular_id)
 
     response = None
     for attempt in range(1, MAX_RETRIES + 1):
@@ -150,8 +151,14 @@ def parse_detail_page(circular_id):
     if not response:
         return None
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    full_text = soup.get_text(separator=" ", strip=True)
+    try:
+        soup = BeautifulSoup(response.text, "html.parser")
+        full_text = soup.get_text(separator=" ", strip=True)
+    except Exception as e:
+        print(f"  ⚠️  Failed to parse HTML (corrupted response): {type(e).__name__}")
+       
+        SESSION = make_session()  # reset session immediately
+        return None
 
     # ── Extract circular number ──────────────────
     # Pattern: RBI/2024-25/73 or RBI/DOR/2024-25/36
@@ -294,6 +301,11 @@ def run_scraper():
         processed_count = progress - total_skipped
         if processed_count > 0 and processed_count % LONG_PAUSE_EVERY == 0:
             polite_sleep(long=True)
+            
+        # Reset session every 50 IDs to prevent connection degradation
+        if progress % 50 == 0:
+            SESSION = make_session()
+            print(f"  🔄 Session refreshed at ID {circular_id}")
 
         # Skip if already processed
         if str(circular_id) in metadata:
