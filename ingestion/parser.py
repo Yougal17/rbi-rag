@@ -84,6 +84,26 @@ def clean_text(raw_text):
 
     # ── Step 5: Final strip ──────────────────────
     text = text.strip()
+    
+    # ── Step 6: Remove garbled non-ASCII characters ──
+    # RBI PDFs contain Hindi letterheads that don't extract cleanly
+    # We keep only printable ASCII + common punctuation
+    # The full English content is always preserved
+    cleaned_lines = []
+    for line in text.split('\n'):
+        # Keep line if it has meaningful English content
+        ascii_chars = sum(1 for c in line if ord(c) < 128)
+        total_chars = len(line)
+        if total_chars == 0:
+            cleaned_lines.append(line)
+            continue
+        # If line is mostly ASCII (>60%), keep it — strip non-ASCII chars
+        if ascii_chars / total_chars > 0.6:
+            clean_line = ''.join(c if ord(c) < 128 else ' ' for c in line)
+            clean_line = re.sub(r' +', ' ', clean_line).strip()
+            cleaned_lines.append(clean_line)
+        # Otherwise skip the line entirely (pure Hindi letterhead)
+    text = '\n'.join(cleaned_lines)
 
     return text
 
