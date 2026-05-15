@@ -259,7 +259,10 @@ def create_hierarchical_chunks(text, metadata):
 
         # Full parent context = header + parent text
         # This is what gets sent to the LLM
-        full_parent = header + parent_text
+        parent_words = parent_text.split()
+        if len(parent_words) > 800:
+            parent_text  = ' '.join(parent_words[:800])
+        full_parent  = header + parent_text
 
         # Split parent into child chunks
         child_texts = split_by_words(
