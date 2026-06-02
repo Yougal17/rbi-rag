@@ -4,3 +4,4 @@ Built to make large government financial documents searchable and easy to retrie
 Inspired by the challenge of processing and understanding complex regulatory documents efficiently.
 Designed to scale for any document dataset, starting with RBI circulars as the initial source.
 Built with Python for data engineers working on NLP and retrieval-augmented generation workflows.
+Part of my journey in data engineering and NLP applications.
