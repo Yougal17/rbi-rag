@@ -171,31 +171,32 @@ def parse_detail_page(circular_id):
     circular_number = circ_match.group(1).strip()
 
     # ── Extract date ─────────────────────────────
-    # RBI detail pages put date in <p align="right">May 09, 2023</p>
     date = "unknown"
 
-    # Strategy 1: <p align="right"> tag
+    # Strategy 1: <p align="right"> — most reliable on RBI pages
     for p in soup.find_all("p", align="right"):
         p_text = p.get_text(strip=True)
         if re.search(r'20\d{2}', p_text):
-            date = p_text
+            date = p_text.strip()
             break
 
-    # Strategy 2: fallback to DD.MM.YYYY pattern in full text
+    # Strategy 2: Month DD, YYYY format
     if date == "unknown":
-        date_match = re.search(r'(\d{1,2}[./]\d{1,2}[./]20\d{2})', full_text)
-        if date_match:
-            date = date_match.group(1)
-
-    # Strategy 3: Month DD, YYYY pattern in full text
-    if date == "unknown":
-        date_match = re.search(
+        m = re.search(
             r'(January|February|March|April|May|June|July|August|'
-            r'September|October|November|December)\s+\d{1,2},\s+20\d{2}',
+            r'September|October|November|December)\s+\d{1,2},?\s+20\d{2}',
             full_text
         )
-        if date_match:
-            date = date_match.group(0)
+        if m:
+            date = m.group(0)
+
+    # Strategy 3: DD.MM.YYYY — validate day <= 31 and month <= 12
+    if date == "unknown":
+        m = re.search(r'(\d{1,2}[./]\d{1,2}[./]20\d{2})', full_text)
+        if m:
+            parts = re.split(r'[./]', m.group(1))
+            if int(parts[0]) <= 31 and int(parts[1]) <= 12:
+                date = m.group(1)
 
     # ── Year gate — skip if outside target range ─
     year = extract_year(date)
@@ -203,29 +204,58 @@ def parse_detail_page(circular_id):
         print(f"  ⏭️  Year {year} outside target range — skipping.")
         return None
 
-    # ── Extract department ───────────────────────
-    # RBI pages have department in a consistent location
-    dept_match = re.search(
-        r'(Department of [A-Za-z\s&,]+|[A-Z][a-z]+ Markets [A-Za-z\s]+Department)',
-        full_text
-    )
-    department = dept_match.group(1).strip() if dept_match else "Unknown"
+   # ── Extract department ───────────────────────
+    department = "Unknown"
+    dept_patterns = [
+        r'(Department of [A-Za-z\s&,\-]+?)(?:,|\n|Central Office)',
+        r'(Financial [A-Za-z\s]+ Department)',
+        r'([A-Z][a-z]+ Markets [A-Za-z\s]+Department)',
+    ]
+    for pattern in dept_patterns:
+        m = re.search(pattern, full_text)
+        if m:
+            candidate = m.group(1).strip()
+            if len(candidate) > 5:
+                department = candidate[:100]
+                break
 
-    # ── Extract title ────────────────────────────
-    # Title is usually in <title> tag or first <h2>/<h3>
+     # ── Extract title ────────────────────────────
+    # RBI pages do NOT put circular title in <title> tag
+    # It appears after "Subject:" or "Sub:" in the body
     title = ""
-    title_tag = soup.find("title")
-    if title_tag:
-        title = title_tag.get_text(strip=True)
-        # RBI title tags look like "RBI | Master Direction on KYC"
-        if "|" in title:
-            title = title.split("|")[-1].strip()
 
-    if not title:
+    full_text_for_title = soup.get_text(separator="\n", strip=True)
+
+    # Strategy 1: "Subject:" or "Sub:" line
+    subject_match = re.search(
+        r'(?:Subject|Sub)\s*[:\-]\s*(.+?)(?:\n|$)',
+        full_text_for_title,
+        re.IGNORECASE
+    )
+    if subject_match:
+        title = subject_match.group(1).strip()[:200]
+
+    # Strategy 2: <h2>, <h3>, <h4> tags
+    if not title or len(title) < 10:
         for tag in ["h2", "h3", "h4"]:
             found = soup.find(tag)
             if found:
-                title = found.get_text(strip=True)
+                candidate = found.get_text(strip=True)
+                if (len(candidate) > 10 and
+                    "Reserve Bank" not in candidate and
+                    "Index To RBI" not in candidate):
+                    title = candidate[:200]
+                    break
+
+    # Strategy 3: Bold text in main content table
+    if not title or len(title) < 10:
+        for b_tag in soup.find_all("b"):
+            candidate = b_tag.get_text(strip=True)
+            if (len(candidate) > 20 and
+                len(candidate) < 200 and
+                "Reserve Bank" not in candidate and
+                circular_number[:3] not in candidate):
+                title = candidate
                 break
 
     # ── Find PDF URL ─────────────────────────────
