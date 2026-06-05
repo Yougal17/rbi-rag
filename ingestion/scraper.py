@@ -219,44 +219,26 @@ def parse_detail_page(circular_id):
                 department = candidate[:100]
                 break
 
-     # ── Extract title ────────────────────────────
-    # RBI pages do NOT put circular title in <title> tag
-    # It appears after "Subject:" or "Sub:" in the body
+    # ── Extract title ────────────────────────────
+    # RBI detail pages always have exactly one <b> tag = circular title
     title = ""
+    b_tag = soup.find("b")
+    if b_tag:
+        candidate = b_tag.get_text(strip=True)
+        if len(candidate) > 10:
+            title = candidate[:300]
 
-    full_text_for_title = soup.get_text(separator="\n", strip=True)
-
-    # Strategy 1: "Subject:" or "Sub:" line
-    subject_match = re.search(
-        r'(?:Subject|Sub)\s*[:\-]\s*(.+?)(?:\n|$)',
-        full_text_for_title,
-        re.IGNORECASE
-    )
-    if subject_match:
-        title = subject_match.group(1).strip()[:200]
-
-    # Strategy 2: <h2>, <h3>, <h4> tags
-    if not title or len(title) < 10:
-        for tag in ["h2", "h3", "h4"]:
-            found = soup.find(tag)
-            if found:
-                candidate = found.get_text(strip=True)
-                if (len(candidate) > 10 and
-                    "Reserve Bank" not in candidate and
-                    "Index To RBI" not in candidate):
-                    title = candidate[:200]
-                    break
-
-    # Strategy 3: Bold text in main content table
-    if not title or len(title) < 10:
-        for b_tag in soup.find_all("b"):
-            candidate = b_tag.get_text(strip=True)
-            if (len(candidate) > 20 and
-                len(candidate) < 200 and
-                "Reserve Bank" not in candidate and
-                circular_number[:3] not in candidate):
-                title = candidate
-                break
+    # Fallback: Subject: line
+    if not title:
+        full_text_lines = soup.get_text(separator="\n", strip=True)
+        subject_match = re.search(
+            r'(?:Subject|Sub)\s*[:\-]\s*(.+?)(?:\n|$)',
+            full_text_lines, re.IGNORECASE
+        )
+        if subject_match:
+            candidate = subject_match.group(1).strip()
+            if len(candidate) > 10:
+                title = candidate[:300]
 
     # ── Find PDF URL ─────────────────────────────
     pdf_url = None
