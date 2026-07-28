@@ -11,7 +11,7 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 # CONFIGURATION
 # ─────────────────────────────────────────────
 
-COLLECTION_NAME = "rbi_circulars"
+COLLECTION_NAME = "qdrant-rbi"
 MODEL_NAME      = "sentence-transformers/all-mpnet-base-v2"
 QDRANT_HOST     = "localhost"
 QDRANT_PORT     = 6333
