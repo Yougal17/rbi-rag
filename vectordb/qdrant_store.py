@@ -18,7 +18,7 @@ EMBEDDINGS_FILE = "data/processed/embeddings.npz"
 
 QDRANT_HOST     = "localhost"
 QDRANT_PORT     = 6333
-COLLECTION_NAME = "rbi_circulars"
+COLLECTION_NAME = "qdrant-rbi"
 
 VECTOR_SIZE     = 768       # must match embedding dimensions from Step 6
 BATCH_SIZE      = 500       # points per upload batch
