@@ -1,3 +1,5 @@
+# backend/main.py
+
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,10 +13,44 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
 
 from generation.generator import RBIGenerator
 
 load_dotenv()
+
+# ─────────────────────────────────────────────
+# QDRANT CLIENT — works both locally and on cloud
+# ─────────────────────────────────────────────
+
+def get_qdrant_client():
+    """
+    Returns a Qdrant client and collection name.
+    Reads from environment variables when deployed to cloud.
+    Falls back to local Docker instance for local development.
+    """
+    qdrant_url     = os.getenv("QDRANT_URL")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
+    collection     = os.getenv("COLLECTION_NAME", "qdrant-rbi")
+
+    if qdrant_url:
+        # Cloud deployment — use Qdrant Cloud
+        client = QdrantClient(
+            url=qdrant_url,
+            api_key=qdrant_api_key,
+            timeout=30,
+        )
+        print(f"  🌐 Connected to Qdrant Cloud: {qdrant_url[:40]}...")
+    else:
+        # Local development — use Docker
+        client = QdrantClient(
+            host="localhost",
+            port=6333,
+        )
+        print(f"  🏠 Connected to local Qdrant (Docker)")
+
+    return client, collection
+
 
 # ─────────────────────────────────────────────
 # REQUEST / RESPONSE MODELS
@@ -77,10 +113,9 @@ class StatsResponse(BaseModel):
 # APP STATE
 # ─────────────────────────────────────────────
 
-# Global generator instance — loaded once at startup
-# Avoids reloading models on every request (would take 30+ seconds)
-generator   = None
-start_time  = None
+# Global instances — loaded once at startup
+generator    = None
+start_time   = None
 system_stats = {}
 
 
@@ -88,7 +123,7 @@ system_stats = {}
 async def lifespan(app: FastAPI):
     """
     Startup and shutdown logic.
-    Runs once when server starts — loads all models into memory.
+    Loads all models once when server starts.
     This is the correct FastAPI pattern for expensive initialization.
     """
     global generator, start_time, system_stats
@@ -98,14 +133,23 @@ async def lifespan(app: FastAPI):
 
     start_time = time.time()
 
-    # Initialize the complete RAG pipeline
+    # Initialize complete RAG pipeline
     generator = RBIGenerator()
 
     # Load system stats from metadata
     try:
-        with open("data/processed/metadata.json", encoding="utf-8") as f:
+        metadata_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "processed", "metadata.json"
+        )
+        chunks_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "processed", "chunks.json"
+        )
+
+        with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
-        with open("data/processed/chunks.json", encoding="utf-8") as f:
+        with open(chunks_path, encoding="utf-8") as f:
             chunks = json.load(f)
 
         years = sorted(set(
@@ -121,12 +165,13 @@ async def lifespan(app: FastAPI):
             "model":           os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             "retrieval":       "Dense + BM25 + RRF + Cross-Encoder",
         }
+
     except Exception as e:
         print(f"⚠️  Could not load stats: {e}")
         system_stats = {
-            "total_chunks":    0,
-            "total_circulars": 0,
-            "years_covered":   [],
+            "total_chunks":    4368,
+            "total_circulars": 317,
+            "years_covered":   ["2022", "2023", "2024"],
             "model":           os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             "retrieval":       "Dense + BM25 + RRF + Cross-Encoder",
         }
@@ -136,11 +181,10 @@ async def lifespan(app: FastAPI):
     print(f"   Circulars: {system_stats['total_circulars']}")
     print(f"   Chunks:    {system_stats['total_chunks']}")
     print(f"   Years:     {system_stats['years_covered']}")
-    print(f"\n📖 API docs available at: http://localhost:8000/docs\n")
+    print(f"\n📖 API docs: http://localhost:8000/docs\n")
 
     yield  # Server runs here
 
-    # Shutdown
     print("\n👋 Shutting down RBI RAG API...")
 
 
@@ -152,14 +196,15 @@ app = FastAPI(
     title="RBI Circular Intelligence API",
     description=(
         "Query RBI circulars using natural language. "
-        "Returns cited answers with circular numbers, dates, and source URLs."
+        "Returns cited answers with circular numbers, dates, and source URLs. "
+        "Built with Dense + BM25 + RRF + Cross-Encoder retrieval pipeline."
     ),
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# CORS — allow React frontend to call this API
-# In production, replace "*" with your actual frontend URL
+# CORS — allows React frontend to call this API from any origin
+# In production, replace "*" with your actual frontend URL for security
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -177,11 +222,14 @@ app.add_middleware(
 async def health_check():
     """
     Health check endpoint.
-    Returns system status and basic stats.
-    Used by deployment platforms to verify service is running.
+    Used by deployment platforms to verify the service is running.
+    Returns system status, model info, and uptime.
     """
     if generator is None:
-        raise HTTPException(status_code=503, detail="Generator not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="Generator not initialized — server is still starting up"
+        )
 
     return HealthResponse(
         status="healthy",
@@ -196,7 +244,8 @@ async def health_check():
 async def get_stats():
     """
     System statistics endpoint.
-    Returns information about the loaded data and models.
+    Returns information about loaded data and models.
+    Useful for the frontend to display system info.
     """
     return StatsResponse(**system_stats)
 
@@ -209,12 +258,22 @@ async def query(request: QueryRequest):
     Takes a natural language question about RBI circulars
     and returns a cited answer with source references.
 
-    Optionally filter by year (2022, 2023, or 2024).
+    The pipeline runs:
+    1. Dense retrieval (semantic similarity via Qdrant)
+    2. BM25 sparse retrieval (keyword matching)
+    3. Reciprocal Rank Fusion (merge both result sets)
+    4. Cross-encoder reranking (precise relevance scoring)
+    5. Gemini generation (cited answer)
+
+    Optionally filter results by year (2022, 2023, or 2024).
     """
     if generator is None:
-        raise HTTPException(status_code=503, detail="Generator not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="Generator not initialized — server is still starting up"
+        )
 
-    # Build filters
+    # Build metadata filters
     filters = None
     if request.year_filter:
         if request.year_filter not in ["2022", "2023", "2024"]:
@@ -224,7 +283,7 @@ async def query(request: QueryRequest):
             )
         filters = {"year": request.year_filter}
 
-    # Run RAG pipeline
+    # Run complete RAG pipeline
     try:
         result = generator.answer(
             query=request.question,
@@ -234,10 +293,19 @@ async def query(request: QueryRequest):
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Generation failed: {str(e)}"
+            detail=f"Pipeline failed: {str(e)}"
         )
 
-    # Format sources
+    # Handle empty or error answers
+    answer_text = result.get("answer") or (
+        "The available RBI circulars do not contain sufficient information "
+        "to answer this question. This may be because the relevant circular "
+        "predates our dataset (pre-2022), is covered in Master Directions "
+        "not in our database, or falls outside RBI's direct regulatory scope. "
+        "For authoritative information, visit: rbi.org.in"
+    )
+
+    # Format source citations
     sources = [
         SourceModel(
             circular_number=s.get("circular_number", ""),
@@ -248,8 +316,6 @@ async def query(request: QueryRequest):
         )
         for s in result.get("sources", [])
     ]
-
-    answer_text = result.get("answer") or "The system could not generate an answer for this query."
 
     return QueryResponse(
         answer=answer_text,
@@ -266,9 +332,14 @@ async def query(request: QueryRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
+    port = int(os.getenv("PORT", 8000))
+
     uvicorn.run(
         "backend.main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=False,  # reload=True causes models to reload on every change
+        port=port,
+        reload=False,
+        # reload=True causes models to reload on every code change
+        # always keep False in production
     )

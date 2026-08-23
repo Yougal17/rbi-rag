@@ -36,8 +36,25 @@ class DenseRetriever:
 
     def __init__(self):
         print("🤖 Loading embedding model for retrieval...")
-        self.model  = SentenceTransformer(MODEL_NAME)
-        self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        self.model = SentenceTransformer(MODEL_NAME)
+
+        # Cloud-aware Qdrant connection
+        qdrant_url     = os.getenv("QDRANT_URL")
+        qdrant_api_key = os.getenv("QDRANT_API_KEY")
+
+        if qdrant_url:
+            self.client = QdrantClient(
+                url=qdrant_url,
+                api_key=qdrant_api_key,
+                timeout=30,
+            )
+        else:
+            self.client = QdrantClient(
+                host=QDRANT_HOST,
+                port=QDRANT_PORT,
+            )
+
+        self.collection_name = os.getenv("COLLECTION_NAME", COLLECTION_NAME)
         print("✅ Dense retriever ready")
 
     def embed_query(self, query):

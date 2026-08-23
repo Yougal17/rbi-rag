@@ -106,7 +106,7 @@ class RBIGenerator:
                     "- The relevant circular predates our dataset (pre-2022)\n"
                     "- This topic is covered in RBI Master Directions not in our database\n"
                     "- This falls outside RBI's direct regulatory scope\n\n"
-                    "For authoritative information, visit: [https://rbi.org.in](https://rbi.org.in)"
+                    "For authoritative information, visit: https://rbi.org.in"
                 ),
                 "sources": [],
                 "chunks":  [],
