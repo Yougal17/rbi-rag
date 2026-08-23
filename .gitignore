@@ -1,42 +1,60 @@
-# Python cache
+# ─── Python ───────────────────────────────
+venv/
+rbirag/
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
+.Python
+*.egg-info/
+dist/
+build/
 
-# Virtual environment
-rbirag/
-
-# Secrets / local config
+# ─── Environment ──────────────────────────
 .env
-.env.*
+.env.local
+.env.production
 
-# Frontend build output and logs
+# ─── Data — Raw and Large Files ───────────
+data/raw/
+data/processed/texts/
+data/processed/embeddings.npz
+data/processed/embedding_metadata.json
+
+# ─── Evaluation Results (auto-generated) ──
+evaluation/results.json
+evaluation/manual_pipeline_results.json
+evaluation/manual_eval_scores.json
+evaluation/ragas_10_results.json
+
+# ─── Debug/temp files ─────────────────────
+debug_page.html
+debug_detail.html
+*.html.bak
+
+# ─── Frontend ─────────────────────────────
 frontend/node_modules/
 frontend/dist/
-frontend/dist-ssr/
-frontend/logs/
-frontend/*.log
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/pnpm-debug.log*
-frontend/lerna-debug.log*
-frontend/*.local
+frontend/.env.local
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+# ─── Docker ───────────────────────────────
+.dockerignore
+
+# ─── IDE ──────────────────────────────────
+.vscode/
 .idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+*.swp
+*.swo
 
-# Local/generated data
-data/raw/
-data/processed/
+# ─── OS ───────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Logs ─────────────────────────────────
+*.log
+logs/
+
+# ─── PDFs ─────────────────────────────────
 *.pdf
 *.json
 *.txt
