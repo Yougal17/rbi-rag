@@ -11,13 +11,32 @@ rbirag/
 .env
 .env.*
 
-# Frontend dependencies
+# Frontend build output and logs
 frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/logs/
+frontend/*.log
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+frontend/*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
 # Local/generated data
 data/raw/
 data/processed/
 *.pdf
-
-# OS files
-.DS_Store
+*.json
+*.txt
