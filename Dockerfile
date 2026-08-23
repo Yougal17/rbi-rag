@@ -2,30 +2,18 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y gcc g++ git && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install PyTorch first separately — it's the largest package
+RUN pip install --no-cache-dir --timeout=300 torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining dependencies
 COPY requirements.cloud.txt .
-RUN pip install --no-cache-dir -r requirements.cloud.txt
+RUN pip install --no-cache-dir --timeout=300 -r requirements.cloud.txt
 
-# Pre-download ML models during build
-# This bakes them into the image — no download at runtime
-RUN python -c "
-from sentence_transformers import SentenceTransformer, CrossEncoder
-import os
-print('Downloading embedding model...')
-SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-print('Downloading cross-encoder...')
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-print('All models downloaded.')
-"
+# Pre-download ML models
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('sentence-transformers/all-mpnet-base-v2'); CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('Models ready.')"
 
-# Copy application code
 COPY backend/ ./backend/
 COPY generation/ ./generation/
 COPY retrieval/ ./retrieval/
@@ -33,7 +21,6 @@ COPY vectordb/ ./vectordb/
 COPY data/processed/chunks.json ./data/processed/chunks.json
 COPY data/processed/metadata.json ./data/processed/metadata.json
 
-# Cloud Run uses PORT environment variable
 ENV PORT=8080
 EXPOSE 8080
 
