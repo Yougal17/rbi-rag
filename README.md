@@ -415,5 +415,8 @@ For regulatory compliance, a confident wrong answer is more dangerous than an ho
 
 ## License
 
-This project is for educational and portfolio purposes.  
-RBI circular data is sourced from rbi.org.in (public government data).
+Licensed under the [MIT License](LICENSE).
+
+RBI circular data is sourced from [rbi.org.in](https://www.rbi.org.in) and is
+public government information. This project is not affiliated with or endorsed
+by the Reserve Bank of India.
