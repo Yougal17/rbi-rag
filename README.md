@@ -4,7 +4,7 @@ A production-grade Retrieval-Augmented Generation (RAG) system that answers natu
 
 **Live Demo:** [rbi-circular-intelligence.vercel.app](https://rbi-circular-intelligence.vercel.app)  
 **API Docs:** [rbi-backend.koyeb.app/docs](https://rbi-backend.koyeb.app/docs)
-
+/*![RBI Circular Intelligence System](docs/screenshot.png)*/
 ---
 
 ## What It Does
@@ -152,7 +152,7 @@ rbi-rag/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/rbi-rag.git
+https://github.com/Yougal17/rbi-rag.git
 cd rbi-rag
 ```
 
@@ -409,7 +409,7 @@ For regulatory compliance, a confident wrong answer is more dangerous than an ho
 ## Author
 
 **Yougal Attri**  
-[LinkedIn](https://linkedin.com/in/yougal-attri) | [GitHub](https://github.com/YOUR-USERNAME)
+[LinkedIn](https://linkedin.com/in/yougal-attri) | [GitHub](https://github.com/Yougal17)
 
 ---
 
