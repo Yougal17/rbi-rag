@@ -130,7 +130,11 @@ function App() {
             <div className="spinner"></div>
             <p>Searching through RBI circulars...</p>
             <p className="loading-sub">
+              If the server was idle, first request may take 45-60 seconds to warm up.
+              Subsequent queries will be fast.
+              <br>
               Running hybrid retrieval → cross-encoder reranking → generating answer
+              </br>
             </p>
           </div>
         )}
